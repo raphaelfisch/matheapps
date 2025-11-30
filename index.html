@@ -177,9 +177,10 @@
     var verbindungFarben = {
         x: '#ff6b6b',  // Rot für x-Achse
         y: '#ffeaa7',  // Gelb für y-Achse
-        z: '#a29bfe'   // Violett für z-Achse
+        z: '#a29bfe',  // Violett für z-Achse
+        w: '#74b9ff'   // Blau für w-Achse (4. Dimension)
     };
-    var operatorFarben = ['#ff6b6b', '#ffeaa7', '#a29bfe']; // x, y, z
+    var operatorFarben = ['#ff6b6b', '#ffeaa7', '#a29bfe', '#74b9ff']; // x, y, z, w
     
     // Responsive Canvas - quadratisch
     function resizeCanvas() {
@@ -327,7 +328,7 @@
             document.getElementById('infoText').textContent = '';
         } else if(anzahlDimensionen === 3) {
             document.getElementById('dimensionInfo').textContent = '';
-            document.getElementById('infoText').textContent = 'Mit Finger drehen';
+            document.getElementById('infoText').textContent = '';
         } else {
             document.getElementById('dimensionInfo').textContent = '';
             document.getElementById('infoText').textContent = '';
@@ -383,8 +384,8 @@
         
         if(anzahlDimensionen === 0) return;
         
-        if(anzahlDimensionen >= 4) {
-            // Kann nicht dargestellt werden - zentriert im Canvas
+        if(anzahlDimensionen >= 5) {
+            // 5+ Dimensionen können nicht dargestellt werden
             ctx.fillStyle = '#ff6b6b';
             ctx.font = 'bold 20px Arial';
             ctx.textAlign = 'center';
@@ -404,7 +405,9 @@
             return;
         }
         
-        if(anzahlDimensionen === 3) {
+        if(anzahlDimensionen === 4) {
+            zeichne4D();
+        } else if(anzahlDimensionen === 3) {
             zeichne3D();
         } else if(anzahlDimensionen === 2) {
             zeichne2D();
@@ -560,6 +563,214 @@
         
         // Zeichne Operatoren
         zeichneOperator3D(ox, oy, oz, gx, gy, gz);
+    }
+    
+    function zeichne4D() {
+        var gx = gitterGroesse[0];
+        var gy = gitterGroesse[1];
+        var gz = gitterGroesse[2];
+        var gw = gitterGroesse[3]; // 4. Dimension
+        
+        // Skalierungsfaktor - kleiner weil mehrere Würfel
+        var basisSkala = Math.min(W, H) / 400;
+        var skala = basisSkala * 0.6 / Math.sqrt(gw); // Kleiner bei mehr Würfeln
+        
+        // Berechne Breite pro Würfel
+        var wuerfelBreite = W / gw;
+        
+        // Sammle alle Punkte und Verbindungen für alle Würfel
+        var alleObjekte = [];
+        
+        for(var w = 0; w < gw; w++) {
+            var offsetX = wuerfelBreite * (w + 0.5); // Zentrum des Würfels
+            var offsetY = H / 2;
+            
+            var punkte = [];
+            var verbindungen = [];
+            
+            // Berechne Ursprung für zentrierte Darstellung
+            var ox = (gx - 1) / 2;
+            var oy = (gy - 1) / 2;
+            var oz = (gz - 1) / 2;
+            
+            // Sammle Punkte für diesen Würfel
+            for(var z = 0; z < gz; z++) {
+                for(var y = 0; y < gy; y++) {
+                    for(var x = 0; x < gx; x++) {
+                        var proj = projekt4D(x - ox, y - oy, z - oz, skala, offsetX, offsetY);
+                        var wert = berechneWert([x, y, z, w]);
+                        punkte.push({ 
+                            x: x, y: y, z: z, w: w,
+                            px: proj.px, py: proj.py, pz: proj.pz, 
+                            wert: wert, skala: proj.skala,
+                            wuerfel: w
+                        });
+                    }
+                }
+            }
+            
+            // Sammle Verbindungen innerhalb des Würfels
+            for(var i = 0; i < punkte.length; i++) {
+                for(var j = i + 1; j < punkte.length; j++) {
+                    var p1 = punkte[i];
+                    var p2 = punkte[j];
+                    var dx = Math.abs(p1.x - p2.x);
+                    var dy = Math.abs(p1.y - p2.y);
+                    var dz = Math.abs(p1.z - p2.z);
+                    if(dx + dy + dz === 1) {
+                        var achse = dx === 1 ? 'x' : (dy === 1 ? 'y' : 'z');
+                        verbindungen.push({von: i, zu: j, achse: achse, punkte: punkte});
+                    }
+                }
+            }
+            
+            // Füge zu Gesamtliste hinzu
+            for(var i = 0; i < punkte.length; i++) {
+                alleObjekte.push({typ: 'kugel', tiefe: punkte[i].pz, punkt: punkte[i], wuerfel: w});
+            }
+            for(var i = 0; i < verbindungen.length; i++) {
+                var v = verbindungen[i];
+                var p1 = punkte[v.von];
+                var p2 = punkte[v.zu];
+                var vordereTiefe = Math.min(p1.pz, p2.pz);
+                alleObjekte.push({typ: 'verbindung', tiefe: vordereTiefe, p1: p1, p2: p2, achse: v.achse, wuerfel: w});
+            }
+        }
+        
+        // Verbindungen zwischen Würfeln (4. Dimension)
+        // Verbinde gleiche Positionen in benachbarten Würfeln
+        for(var w = 0; w < gw - 1; w++) {
+            var wuerfel1Start = w * gx * gy * gz;
+            var wuerfel2Start = (w + 1) * gx * gy * gz;
+            
+            for(var i = 0; i < gx * gy * gz; i++) {
+                var idx1 = wuerfel1Start + i;
+                var idx2 = wuerfel2Start + i;
+                // Finde die entsprechenden Punkte
+                var p1 = null, p2 = null;
+                for(var j = 0; j < alleObjekte.length; j++) {
+                    if(alleObjekte[j].typ === 'kugel') {
+                        var p = alleObjekte[j].punkt;
+                        var pIdx = p.x + p.y * gx + p.z * gx * gy;
+                        if(p.w === w && pIdx === i) p1 = p;
+                        if(p.w === w + 1 && pIdx === i) p2 = p;
+                    }
+                }
+                if(p1 && p2) {
+                    var vordereTiefe = Math.min(p1.pz, p2.pz);
+                    alleObjekte.push({typ: 'verbindung', tiefe: vordereTiefe, p1: p1, p2: p2, achse: 'w', wuerfel: -1});
+                }
+            }
+        }
+        
+        // Berechne Tiefenbereich
+        var minTiefe = Infinity, maxTiefe = -Infinity;
+        for(var i = 0; i < alleObjekte.length; i++) {
+            if(alleObjekte[i].typ === 'kugel') {
+                var t = alleObjekte[i].punkt.pz;
+                if(t < minTiefe) minTiefe = t;
+                if(t > maxTiefe) maxTiefe = t;
+            }
+        }
+        var tiefenBereich = maxTiefe - minTiefe || 1;
+        
+        // Sortiere nach Tiefe
+        alleObjekte.sort(function(a, b) {
+            if(Math.abs(b.tiefe - a.tiefe) > 0.001) {
+                return b.tiefe - a.tiefe;
+            }
+            if(a.typ === 'verbindung' && b.typ === 'kugel') return 1;
+            if(a.typ === 'kugel' && b.typ === 'verbindung') return -1;
+            return 0;
+        });
+        
+        var kugelRadius = Math.max(6, 10 * skala);
+        
+        // Zeichne alles
+        for(var i = 0; i < alleObjekte.length; i++) {
+            var obj = alleObjekte[i];
+            
+            if(obj.typ === 'verbindung') {
+                var p1 = obj.p1;
+                var p2 = obj.p2;
+                var dx = p2.px - p1.px;
+                var dy = p2.py - p1.py;
+                var laenge = Math.sqrt(dx * dx + dy * dy);
+                if(laenge < kugelRadius * 2) continue;
+                
+                var nx = dx / laenge;
+                var ny = dy / laenge;
+                var startX = p1.px + nx * kugelRadius;
+                var startY = p1.py + ny * kugelRadius;
+                var endX = p2.px - nx * kugelRadius;
+                var endY = p2.py - ny * kugelRadius;
+                
+                var avgTiefe = (p1.pz + p2.pz) / 2;
+                var tiefeFaktor = 0.4 + 0.6 * (1 - (avgTiefe - minTiefe) / tiefenBereich);
+                
+                var farbe = obj.achse === 'w' ? '#74b9ff' : verbindungFarben[obj.achse]; // Blau für 4. Dimension
+                var rgb = hexZuRgb(farbe);
+                ctx.strokeStyle = 'rgba(' + Math.floor(rgb.r * tiefeFaktor) + ',' + Math.floor(rgb.g * tiefeFaktor) + ',' + Math.floor(rgb.b * tiefeFaktor) + ', 0.8)';
+                ctx.lineWidth = obj.achse === 'w' ? 1 : 2; // Dünnere Linien zwischen Würfeln
+                ctx.beginPath();
+                ctx.moveTo(startX, startY);
+                ctx.lineTo(endX, endY);
+                ctx.stroke();
+            } else {
+                var p = obj.punkt;
+                var tiefeFaktor = 0.5 + 0.5 * (1 - (p.pz - minTiefe) / tiefenBereich);
+                var istAusgewaehlt = (p.wert === n);
+                zeichneKugel3D(p.px, p.py, p.wert, skala, tiefeFaktor, istAusgewaehlt);
+            }
+        }
+        
+        // Zeichne 4D Operatoren
+        zeichneOperator4D(gx, gy, gz, gw, skala);
+    }
+    
+    function projekt4D(x, y, z, skala, offsetX, offsetY) {
+        // Tausche x und y, und invertiere damit (0,0,0) vorne ist
+        var xInv = -y;
+        var yInv = -x;
+        
+        // Horizontale Rotation um Z-Achse
+        var cosH = Math.cos(drehWinkelH);
+        var sinH = Math.sin(drehWinkelH);
+        var xRot = xInv * cosH - yInv * sinH;
+        var yRot = xInv * sinH + yInv * cosH;
+        var zRot = z;
+        
+        // Vertikale Rotation um X-Achse (kippen)
+        var cosV = Math.cos(drehWinkelV);
+        var sinV = Math.sin(drehWinkelV);
+        var yRot2 = yRot * cosV - zRot * sinV;
+        var zRot2 = yRot * sinV + zRot * cosV;
+        
+        // Isometrische Projektion
+        var isoX = (xRot * 28 - yRot2 * 28) * skala;
+        var isoY = (-xRot * 16 - yRot2 * 16 + zRot2 * 32) * skala;
+        
+        var px = offsetX + isoX;
+        var py = offsetY - isoY;
+        
+        var tiefe = -xRot - yRot2 + zRot2 * 0.1;
+        
+        return { px: px, py: py, pz: tiefe, skala: skala };
+    }
+    
+    function zeichneOperator4D(gx, gy, gz, gw, skala) {
+        var basisSkala = Math.min(W, H) / 400;
+        var opSkala = basisSkala * 0.7;
+        
+        // Operatoren unten anzeigen
+        var abstand = W / 5;
+        var y = H - 35 * opSkala;
+        
+        // x (·2), y (·3), z (·5), w (·7)
+        zeichneOperatorSymbol(abstand * 1, y, primListe[0], 1, 0, operatorFarben[0], opSkala);
+        zeichneOperatorSymbol(abstand * 2, y, primListe[1], 1, 0, operatorFarben[1], opSkala);
+        zeichneOperatorSymbol(abstand * 3, y, primListe[2], 1, 0, operatorFarben[2], opSkala);
+        zeichneOperatorSymbol(abstand * 4, y, primListe[3], 1, 0, '#74b9ff', opSkala); // Blau für 4. Dimension
     }
     
     function hexZuRgb(hex) {
